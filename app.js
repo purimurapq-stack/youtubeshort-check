@@ -1,28 +1,38 @@
 import { Measurement, STATES, parseVideoId, csv } from './core.js';
+import { AUTO_VIDEOS, CATALOG_STATUS } from './auto-videos.js';
+const autoIds = AUTO_VIDEOS.map(video => video.id);
 const $ = id => document.getElementById(id);
 let ids = [], player = null, apiReady = false, generation = 0, switchTimer, pollTimer, autoplayTimer;
 try { const saved = JSON.parse(localStorage.getItem('shorts-lab-v1') || '[]'); if (Array.isArray(saved)) ids = saved.filter(id => typeof id === 'string' && /^[\w-]{11}$/.test(id)); } catch { /* Storage is optional. */ }
 const warn = message => { $('warning').textContent = message; $('warning').hidden = !message; };
 const seconds = ms => (ms / 1000).toFixed(1);
+function selectedIds() { return $('automatic').checked ? autoIds : ids; }
 function renderList() {
+  const automatic = $('automatic').checked;
+  const visibleIds = measurement.active ? measurement.ids : selectedIds();
+  $('catalogStatus').textContent = automatic ? CATALOG_STATUS : '手動登録した動画を順番に再生します。';
+  $('automatic').disabled = measurement.active;
+  $('addForm').hidden = automatic;
+  $('emptyList').textContent = automatic ? '確認済みの初期動画がありません。自動選択モードをOFFにすると手動登録できます。' : 'まだ動画がありません。動画のURLを追加してください。';
+  $('listHelp').textContent = automatic ? '確認済み初期データを使用します。開始時と周回時にランダムに並べ替えます。' : 'リストはこのブラウザに保存されます。計測中の編集はできません。';
   $('videoList').replaceChildren();
-  ids.forEach((id, index) => {
+  visibleIds.forEach((id, index) => {
     const li = document.createElement('li');
     if (measurement.active && measurement.visit.index === index) li.className = 'active';
     const number = document.createElement('b'); number.textContent = String(index + 1).padStart(2, '0');
     const name = document.createElement('span'); name.textContent = id;
-    const remove = document.createElement('button'); remove.textContent = '×'; remove.setAttribute('aria-label', `${id} を削除`); remove.disabled = measurement.active;
+    const remove = document.createElement('button'); remove.textContent = '×'; remove.setAttribute('aria-label', `${id} を削除`); remove.disabled = measurement.active || automatic;
     remove.onclick = () => { ids.splice(index, 1); saveList(); };
     li.append(number, name, remove); $('videoList').append(li);
   });
-  $('listCount').textContent = `${ids.length}本`; $('emptyList').hidden = ids.length > 0;
-  $('start').disabled = !apiReady || measurement.active || ids.length === 0;
+  $('listCount').textContent = `${visibleIds.length}本`; $('emptyList').hidden = visibleIds.length > 0;
+  $('start').disabled = !apiReady || measurement.active || selectedIds().length === 0;
   $('stop').disabled = !measurement.active;
   $('videoUrl').disabled = measurement.active; $('addForm').querySelector('button').disabled = measurement.active;
 }
 function saveList() { try { localStorage.setItem('shorts-lab-v1', JSON.stringify(ids)); } catch { $('listMessage').textContent = 'ブラウザへの保存ができません。リストはこの画面内のみ有効です。'; } renderList(); }
 $('addForm').onsubmit = event => {
-  event.preventDefault(); if (measurement.active) return;
+  event.preventDefault(); if (measurement.active || $('automatic').checked) return;
   const id = parseVideoId($('videoUrl').value);
   if (!id) { $('listMessage').textContent = '対応するYouTubeのURL（11文字の動画ID）を入力してください。'; return; }
   if (ids.includes(id)) { $('listMessage').textContent = 'この動画は登録済みです。'; return; }
@@ -75,7 +85,9 @@ function switchVideo(visit) {
         if (!measurement.active || token !== generation) return;
         const errors = { 2: '動画IDまたはパラメーターが無効', 5: 'HTML5プレーヤーで再生できません', 100: '削除済み、非公開、または動画が見つかりません', 101: '埋め込み再生が許可されていません', 150: '埋め込み再生が許可されていません', 153: 'Refererまたはクライアント識別情報がありません' };
         const message = `エラー ${event.data}: ${errors[event.data] || '再生できません'}`;
-        measurement.log('再生エラー', null, message); warn(`${message}。設定した切替時刻に次へ進みます。`);
+        // End this visit immediately; generation checks discard old player callbacks.
+        measurement.sample(read('getCurrentTime'), read('getDuration'), false);
+        measurement.fail(message);
       }
     }
   });
@@ -116,11 +128,12 @@ function render() {
   const elapsed = Math.floor(totals.elapsed / 1000); $('elapsed').textContent = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
 }
 $('start').onclick = () => {
-  if (measurement.active || !apiReady || !ids.length) return;
+  if (measurement.active || !apiReady || !selectedIds().length) return;
   if (!$('interval').reportValidity()) return;
   $('logs').replaceChildren(); $('emptyLog').hidden = false; warn('');
-  measurement.start(ids, Number($('interval').value));
+  measurement.start(selectedIds(), Number($('interval').value), { automatic: $('automatic').checked });
 };
+$('automatic').onchange = () => { if (!measurement.active) renderList(); };
 $('stop').onclick = () => {
   if (measurement.active) { measurement.sample(read('getCurrentTime'), read('getDuration'), false); measurement.stop(); }
 };

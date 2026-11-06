@@ -54,3 +54,33 @@ test('invalid intervals and empty list rejected', () => {
   for (const i of [4, 121, NaN]) assert.throws(() => fixture(i));
   assert.throws(() => new Measurement().start([], 20));
 });
+test('automatic cycles contain every ID once and avoid boundary repeats', () => {
+  const m = new Measurement(); const pool = ['abcdefghijk', '12345678901', 'ZYXWVUTSRQP'];
+  m.start(pool, 20, { automatic: true });
+  let previous = null;
+  for (let round = 0; round < 30; round++) {
+    const seen = [];
+    for (let i = 0; i < pool.length; i++) {
+      assert.notEqual(m.visit.id, previous); previous = m.visit.id; seen.push(previous); m.next();
+    }
+    assert.deepEqual([...seen].sort(), [...pool].sort());
+  }
+  m.stop();
+});
+test('error skips immediately, excludes failed IDs and stops when all fail', () => {
+  const m = new Measurement(); m.start(ids, 20, { automatic: true });
+  const first = m.visit.id; m.fail('100: removed'); assert.notEqual(m.visit.id, first);
+  for (let i = 0; i < 5; i++) { m.next(); assert.notEqual(m.visit.id, first); }
+  m.fail('150: embedding disabled'); assert.equal(m.active, false);
+  assert.equal(m.rows.filter(r => r.event === '再生エラー').length, 2);
+  assert.ok(m.rows.some(r => r.event === '再生可能な候補なし'));
+});
+test('manual mode stays sequential and supports error skip', () => {
+  const m = new Measurement(); m.start(ids, 20); assert.equal(m.visit.id, ids[0]);
+  m.fail('100'); assert.equal(m.visit.id, ids[1]); m.stop();
+});
+test('automatic selection retains deadline and latency measurement', () => {
+  let t = 0; const m = new Measurement({ now: () => t }); m.start(ids, 20, { automatic: true });
+  t = 3000; m.setState(1); assert.equal(m.visit.latency, 3000); assert.equal(m.deadline, 20000);
+  t = 20000; m.sample(17, 60); assert.equal(m.visit.switched, 20000); m.stop();
+});

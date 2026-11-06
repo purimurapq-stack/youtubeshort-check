@@ -27,7 +27,7 @@ jobs:
       - name: Prepare static files
         run: |
           mkdir _site
-          cp index.html style.css app.js core.js _site/
+          cp index.html style.css app.js core.js auto-videos.js _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

@@ -16,6 +16,8 @@ const assert = require('node:assert/strict');
         stopVideo(){this.stopped=true;} destroy(){this.destroyed=true;}
       }}; window.onYouTubeIframeAPIReady();` }));
     await page.goto('http://127.0.0.1:8000');
+    assert.equal(await page.locator('#automatic').isChecked(), true);
+    await page.locator('#automatic').uncheck();
     for (const id of ['abcdefghijk', '12345678901']) { await page.locator('#videoUrl').fill('https://youtube.com/shorts/' + id); await page.locator('#addForm button').click(); }
     assert.equal(await page.locator('#videoList li').count(), 2);
     await page.locator('#start').click(); await page.waitForFunction(() => document.querySelector('#state').textContent === 'PLAYING');
@@ -34,11 +36,25 @@ const assert = require('node:assert/strict');
     const downloaded = page.waitForEvent('download'); await page.locator('#download').click(); const download = await downloaded;
     const fs = require('node:fs'); const contents = fs.readFileSync(await download.path()); assert.deepEqual([...contents.subarray(0,3)], [239,187,191]);
     await page.locator('#videoList button').last().click(); assert.equal(await page.locator('#videoList li').count(), 1);
-    await page.reload(); assert.equal(await page.locator('#videoList li').count(), 1);
+    await page.reload(); await page.locator('#automatic').uncheck(); assert.equal(await page.locator('#videoList li').count(), 1);
     await page.screenshot({path:'/tmp/shorts-lab-desktop.png',fullPage:true});
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({path:'/tmp/shorts-lab-mobile.png',fullPage:true});
+    // Fictional IDs are used only by this test double, never the production catalogue.
+    await page.route('**/auto-videos.js', route => route.fulfill({ contentType: 'text/javascript', body: "export const AUTO_VIDEOS=[{id:'abcdefghijk'},{id:'12345678901'},{id:'ZYXWVUTSRQP'}]; export const CATALOG_STATUS='TEST FIXTURE';" }));
+    await page.reload(); assert.equal(await page.locator('#automatic').isChecked(), true);
+    await page.locator('#start').click();
+    await page.waitForFunction(() => window.testPlayer && document.querySelector('#state').textContent === 'PLAYING');
+    const initial = await page.evaluate(() => testPlayer.id);
+    await page.evaluate(() => testPlayer.options.events.onError({data:100}));
+    await page.waitForFunction(id => testPlayer.id !== id, initial);
+    assert.match(await page.locator('#logs').textContent(), /再生エラー/);
+    await page.evaluate(() => testPlayer.options.events.onError({data:150}));
+    await page.waitForTimeout(100);
+    await page.evaluate(() => testPlayer.options.events.onError({data:101}));
+    await page.waitForFunction(() => document.querySelector('#stop').disabled);
+    assert.match(await page.locator('#logs').textContent(), /再生可能な候補なし/);
     assert.deepEqual(errors, []);
     console.log('PASS: URL registration/deletion/persistence, start, buffering, stall, ended, 5s switching/wrap, reset, stop, CSV BOM, responsive layout, no JS errors (mock YouTube API).');
   } finally { await browser.close(); }

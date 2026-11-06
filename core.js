@@ -17,6 +17,18 @@ export function csv(rows) {
   const quote = value => '"' + String(value ?? '').replace(/"/g, '""') + '"';
   return '\uFEFF' + [columns, ...rows.map(r => [r.date, r.number, r.id, r.event, r.position.toFixed(3), r.duration == null ? '' : (r.duration / 1000).toFixed(3), r.detail])].map(r => r.map(quote).join(',')).join('\r\n') + '\r\n';
 }
+export function shuffled(ids, previous = null, random = Math.random) {
+  const result = [...ids];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  if (result.length > 1 && result[0] === previous) {
+    const j = result.findIndex(id => id !== previous);
+    [result[0], result[j]] = [result[j], result[0]];
+  }
+  return result;
+}
 export class Measurement {
   constructor({ now = () => performance.now(), date = () => new Date().toISOString(), onLog = () => {}, onSwitch = () => {}, onStop = () => {} } = {}) {
     Object.assign(this, { now, date, onLog, onSwitch, onStop });
@@ -27,12 +39,13 @@ export class Measurement {
     const row = { date: this.date(), number: v ? v.index + 1 : '', id: v?.id || '', event, position: this.position || 0, duration, detail };
     this.rows.push(row); this.onLog(row);
   }
-  start(ids, interval) {
+  start(ids, interval, { automatic = false } = {}) {
     if (!ids.length || !Number.isFinite(interval) || interval < 5 || interval > 120) throw new Error('動画と5〜120秒の切替間隔が必要です');
-    this.ids = [...ids]; this.interval = interval; this.rows = []; this.visits = [];
+    this.automatic = automatic; this.failed = new Set();
+    this.ids = automatic ? shuffled([...new Set(ids)]) : [...ids]; this.interval = interval; this.rows = []; this.visits = [];
     this.started = this.now(); this.stopped = null; this.active = true;
     this.bufferCount = 0; this.stallCount = 0; this.bufferTotal = 0; this.stallTotal = 0;
-    this.visit = null; this.position = 0; this.log('計測開始'); this.switchTo(0);
+    this.visit = null; this.position = 0; this.log('計測開始', null, automatic ? '自動選択モード' : '手動登録モード'); this.switchTo(0);
   }
   switchTo(index) {
     if (!this.active) return;
@@ -44,7 +57,31 @@ export class Measurement {
     this.bufferStart = null; this.stallStart = null;
     this.log('動画切替開始'); this.onSwitch(this.visit);
   }
-  next() { this.switchTo((this.visit.index + 1) % this.ids.length); }
+  next() {
+    if (!this.active) return;
+    const previous = this.visit.id;
+    if (this.ids.every(id => this.failed.has(id))) {
+      this.log('再生可能な候補なし', null, '全候補で再生エラーが発生したため計測を終了します'); this.stop(); return;
+    }
+    let index = this.visit.index;
+    do {
+      index++;
+      if (index >= this.ids.length) {
+        if (this.automatic) this.ids = shuffled(this.ids, previous);
+        index = 0;
+      }
+    } while (this.failed.has(this.ids[index]));
+    // Failed entries can otherwise make the only cycle boundary choice repeat.
+    if (this.automatic && this.ids[index] === previous) {
+      const alternative = this.ids.findIndex(id => id !== previous && !this.failed.has(id));
+      if (alternative >= 0) [this.ids[index], this.ids[alternative]] = [this.ids[alternative], this.ids[index]];
+    }
+    this.switchTo(index);
+  }
+  fail(detail) {
+    if (!this.active || this.failed.has(this.visit.id)) return;
+    this.log('再生エラー', null, detail); this.failed.add(this.visit.id); this.next();
+  }
   endBuffer(t) {
     if (this.bufferStart == null) return;
     const d = t - this.bufferStart; this.bufferTotal += d; this.visit.buffer += d;
