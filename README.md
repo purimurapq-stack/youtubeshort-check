@@ -61,3 +61,11 @@ PLAYWRIGHT_MODULE=/absolute/path/to/playwright CHROME_PATH=/usr/bin/chromium nod
 ```
 
 クラウド環境の設定ドラフトには起動手順とYouTube用の許可ドメイン（`www.youtube.com`, `*.youtube.com`, `*.googlevideo.com`, `*.ytimg.com`）を保存しています。ドラフト保存だけでは現在の通信制限は変わりません。環境設定で確認・保存し、環境を公開した後、実動画で再検証が必要です。
+
+## Pages公開で「Get Pages site failed / Not Found」になる場合
+
+このツールはHTMLをそのまま公開するため、`actions/configure-pages`のメタデータやビルド設定を使用しません。ワークフローはテスト → 静的ファイル作成 → artifactアップロード → deploy-pagesで公開します。必要な`contents: read`、`pages: write`、`id-token: write`は設定済みです。
+
+`configure-pages@v5`の`enablement: true`は、通常の`GITHUB_TOKEN`だけではPagesサイト作成を保証できません。公式仕様では別の適切な権限付きトークンが必要なため、本ツールでは追加の秘密情報を要求せず、不要なconfigure-pages手順を省いています。Pagesサイトの有効化自体はGitHubのSettings → Pagesで行ってください。
+
+デプロイ段階でもNot Foundとなる場合は、リポジトリ管理者としてPagesのSourceがGitHub Actionsになっているか、非公開リポジトリの場合は契約プランがPagesを利用できるか、組織のPages制限がないか確認してください。configure-pagesの省略だけで未作成のPagesサイトが作成されるわけではありません。

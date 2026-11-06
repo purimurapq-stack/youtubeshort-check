@@ -22,7 +22,8 @@ jobs:
         with:
           node-version: '24'
       - run: npm test
-      - uses: actions/configure-pages@v5
+      # Plain static files do not need configure-pages metadata or generator setup.
+      # Pages must be enabled with Source = GitHub Actions in repository settings.
       - name: Prepare static files
         run: |
           mkdir _site
